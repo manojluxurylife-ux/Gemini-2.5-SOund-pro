@@ -61,7 +61,7 @@ export class HybridAIEngine {
     }
 
     try {
-      // Direct use of Gemini 3 Flash
+      // Use Gemini 3 Flash
       const modelName = 'gemini-3-flash-preview';
       const contents: any[] = history.map(m => ({
         role: m.role === 'assistant' ? 'model' : 'user',

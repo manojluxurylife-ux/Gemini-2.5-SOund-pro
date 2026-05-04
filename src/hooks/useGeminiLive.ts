@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality } from "@google/genai";
-import { float32ToInt16PCM, int16PCMToFloat32, SAMPLE_RATE, createAudioContext } from '../lib/audio-utils';
+import { float32ToInt16PCM, int16PCMToFloat32, SAMPLE_RATE, OUTPUT_SAMPLE_RATE, resample } from '../lib/audio-utils';
 
 export interface Message {
   role: 'user' | 'model';
@@ -89,15 +89,15 @@ export function useGeminiLive() {
       });
       
       audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({
-        sampleRate: SAMPLE_RATE,
+        sampleRate: OUTPUT_SAMPLE_RATE,
       });
       
       const session = await (ai as any).live.connect({
-        model: "gemini-3.1-flash-live-preview",
+        model: "gemini-3.1-flash-live-preview", 
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: "Zephyr" } },
+            voiceConfig: { prebuiltVoiceConfig: { voiceName: "Kore" } },
           },
           inputAudioTranscription: {},
           outputAudioTranscription: {},
@@ -172,7 +172,8 @@ export function useGeminiLive() {
 
         // Send audio to Gemini
         if (isConnectedRef.current && sessionRef.current) {
-          const pcmData = float32ToInt16PCM(inputData);
+          const resampledData = resample(inputData, OUTPUT_SAMPLE_RATE, SAMPLE_RATE);
+          const pcmData = float32ToInt16PCM(resampledData);
           sessionRef.current.sendRealtimeInput({
             audio: { data: pcmData, mimeType: `audio/pcm;rate=${SAMPLE_RATE}` }
           });

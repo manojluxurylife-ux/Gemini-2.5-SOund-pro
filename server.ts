@@ -3,7 +3,6 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
-import mongoose from "mongoose";
 import axios from "axios";
 import { google } from "googleapis";
 import { OAuth2Client } from "google-auth-library";
@@ -23,13 +22,6 @@ const genAI = process.env.GOOGLE_GENAI_API_KEY ? new GoogleGenAI({ apiKey: proce
 async function startServer() {
   const app = express();
   const PORT = 3000;
-
-  // MongoDB Connection (Optional, keeping for compatibility if needed)
-  if (process.env.MONGODB_URI) {
-    mongoose.connect(process.env.MONGODB_URI)
-      .then(() => console.log("Connected to MongoDB"))
-      .catch(err => console.error("MongoDB connection error:", err));
-  }
 
   app.use(express.json({ limit: '20mb' }));
 
@@ -364,6 +356,73 @@ async function startServer() {
   app.post("/api/auth/logout", (req: any, res) => {
     req.session = null;
     res.json({ success: true });
+  });
+
+  // ── Database Routes ────────────────────────────────────────────────────────
+  // Helper to get userId with guest fallback for preview environment
+  const getUserId = (req: any) => req.session.userId || 'nexus-guest-preview';
+
+  app.get("/api/clients", (req: any, res) => {
+    const userId = getUserId(req);
+    const clients = db.prepare('SELECT * FROM clients WHERE user_id = ? ORDER BY created_at DESC').all(userId);
+    res.json(clients);
+  });
+
+  app.post("/api/clients", (req: any, res) => {
+    const userId = getUserId(req);
+    const { name, phone, case_number, court, next_date, purpose } = req.body;
+    if (!name) return res.status(400).json({ error: "Name is required" });
+    
+    const stmt = db.prepare(`
+      INSERT INTO clients (user_id, name, phone, case_number, court, next_date, purpose)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    const result = stmt.run(userId, name, phone, case_number, court, next_date, purpose);
+    res.json({ id: result.lastInsertRowid });
+  });
+
+  app.get("/api/knowledge", (req: any, res) => {
+    const userId = getUserId(req);
+    const items = db.prepare('SELECT * FROM knowledge_base WHERE user_id = ? ORDER BY created_at DESC').all(userId);
+    res.json(items);
+  });
+
+  app.post("/api/knowledge", (req: any, res) => {
+    const userId = getUserId(req);
+    const { title, content, category } = req.body;
+    if (!title || !content) return res.status(400).json({ error: "Title and content are required" });
+    
+    const stmt = db.prepare(`
+      INSERT INTO knowledge_base (user_id, title, content, category)
+      VALUES (?, ?, ?, ?)
+    `);
+    const result = stmt.run(userId, title, content, category);
+    res.json({ id: result.lastInsertRowid });
+  });
+
+  app.get("/api/chat", (req: any, res) => {
+    const userId = getUserId(req);
+    const { context } = req.query;
+    let items;
+    if (context) {
+      items = db.prepare('SELECT * FROM chat_history WHERE user_id = ? AND context = ? ORDER BY created_at ASC').all(userId, context);
+    } else {
+      items = db.prepare('SELECT * FROM chat_history WHERE user_id = ? ORDER BY created_at ASC').all(userId);
+    }
+    res.json(items);
+  });
+
+  app.post("/api/chat", (req: any, res) => {
+    const userId = getUserId(req);
+    const { role, content, model, context } = req.body;
+    if (!role || !content) return res.status(400).json({ error: "Role and content are required" });
+    
+    const stmt = db.prepare(`
+      INSERT INTO chat_history (user_id, role, content, model, context)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    const result = stmt.run(userId, role, content, model, context);
+    res.json({ id: result.lastInsertRowid });
   });
 
   // ── Offline Gemma4 proxy (calls Python FastAPI on port 8000) ──────────────

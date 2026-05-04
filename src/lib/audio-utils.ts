@@ -42,3 +42,17 @@ export function createAudioContext(): AudioContext {
     sampleRate: OUTPUT_SAMPLE_RATE,
   });
 }
+
+/**
+ * Resamples a Float32Array from one sample rate to another.
+ */
+export function resample(data: Float32Array, fromRate: number, toRate: number): Float32Array {
+  if (fromRate === toRate) return data;
+  const ratio = fromRate / toRate;
+  const newLength = Math.round(data.length / ratio);
+  const result = new Float32Array(newLength);
+  for (let i = 0; i < newLength; i++) {
+    result[i] = data[Math.round(i * ratio)];
+  }
+  return result;
+}

@@ -14,6 +14,7 @@ import { VoiceVisualizer } from './VoiceVisualizer';
 import { HybridAIEngine, AIMessage, AIResponse } from "../lib/ai-engine";
 import { useGeminiLive } from "../hooks/useGeminiLive";
 import { LocalDB } from "../lib/local-db";
+import { LegalApiService } from "../lib/api-service";
 import { jsPDF } from "jspdf";
 import { Document, Packer, Paragraph, TextRun } from "docx";
 import { saveAs } from "file-saver";
@@ -314,6 +315,30 @@ export default function AdvocatePortal({ onBack }: { onBack: () => void }) {
     }
   }, [chatHistory, view]);
 
+  const handleAddClient = async () => {
+    const name = prompt("Client Name:");
+    if (!name) return;
+    const phone = prompt("Phone:");
+    const court = prompt("Court:");
+    
+    const newClient = {
+      name,
+      phone: phone || '',
+      court: court || '',
+      case_number: 'PENDING',
+      next_date: new Date().toISOString().split('T')[0],
+      purpose: 'Initial Consultation'
+    };
+
+    try {
+      const { id } = await LegalApiService.addClient(newClient);
+      setClients(prev => [{ ...newClient, id }, ...prev]);
+    } catch (err) {
+      console.error("Failed to add client", err);
+      alert("Failed to add client to database");
+    }
+  };
+
   const speakResponse = (response: AIResponse) => {
     const cleanText = response.text
       .replace(/\*\*/g, '')
@@ -324,7 +349,15 @@ export default function AdvocatePortal({ onBack }: { onBack: () => void }) {
 
     const utterance = new SpeechSynthesisUtterance(cleanText);
     const voices = window.speechSynthesis.getVoices();
-    const voice = voices.find(v => v.lang.startsWith('en'));
+    // Try to find a high quality female English voice
+    const femaleVoice = voices.find(v => 
+      v.lang.startsWith('en') && 
+      (v.name.toLowerCase().includes('female') || 
+       v.name.toLowerCase().includes('samantha') || 
+       v.name.toLowerCase().includes('victoria') ||
+       v.name.toLowerCase().includes('google uk english female'))
+    );
+    const voice = femaleVoice || voices.find(v => v.lang.startsWith('en'));
     if (voice) utterance.voice = voice;
     window.speechSynthesis.speak(utterance);
   };
@@ -388,19 +421,60 @@ export default function AdvocatePortal({ onBack }: { onBack: () => void }) {
 
   useEffect(() => {
     const init = async () => {
-      await localDB.init();
-      const savedClients = localDB.query("SELECT * FROM clients");
-      if (savedClients.length > 0) {
+      try {
+        let serverClients = [];
+        try {
+          serverClients = await LegalApiService.getClients();
+        } catch (err) {
+          console.warn("Failed to fetch from SQLite server, falling back to LocalDB:", err);
+          // Continue to localDB fallback
+        }
+
+        if (serverClients && serverClients.length > 0) {
+          setClients(serverClients);
+        } else {
+          // If server is empty or failed, check local
+          await localDB.init();
+          const savedClients = localDB.query("SELECT * FROM clients");
+          if (savedClients && savedClients.length > 0) {
+            setClients(savedClients);
+            // Optionally sync to server if possible
+            try {
+              for (const c of savedClients) {
+                await LegalApiService.addClient(c);
+              }
+            } catch (e) {
+              console.warn("Failed to sync local data to server:", e);
+            }
+          } else {
+            const initial = [
+              { name: 'Elena Rodriguez', phone: '+1 555-0199', court: 'District Court, Aluva', case_number: 'OS 145/2025', next_date: '2026-03-15', purpose: 'Filing Written Statement' },
+            ];
+            try {
+              for (const c of initial) {
+                await LegalApiService.addClient(c);
+              }
+            } catch (e) {
+              console.warn("Failed to save initial data to server:", e);
+            }
+            setClients(initial);
+          }
+        }
+
+        let serverChat = [];
+        try {
+          serverChat = await LegalApiService.getChatHistory('consult');
+        } catch (err) {
+          console.warn("Failed to fetch chat history from server:", err);
+        }
+        if (serverChat && serverChat.length > 0) {
+          setChatHistory(serverChat.map(m => ({ role: m.role, content: m.content, model: m.model })));
+        }
+      } catch (err) {
+        console.error("Failed to fetch from SQLite server, falling back to LocalDB", err);
+        await localDB.init();
+        const savedClients = localDB.query("SELECT * FROM clients");
         setClients(savedClients);
-      } else {
-        const initial = [
-          { id: 1, name: 'Elena Rodriguez', phone: '+1 555-0199', court: 'District Court, Aluva', case_number: 'OS 145/2025', next_date: '2026-03-15', purpose: 'Filing Written Statement' },
-        ];
-        initial.forEach(c => {
-          localDB.run("INSERT INTO clients (name, phone, case_number, court, next_date, purpose) VALUES (?, ?, ?, ?, ?, ?)", 
-            [c.name, c.phone, c.case_number, c.court, c.next_date, c.purpose]);
-        });
-        setClients(initial);
       }
     };
     init();
@@ -416,6 +490,11 @@ export default function AdvocatePortal({ onBack }: { onBack: () => void }) {
     setChatHistory(historyWithUser);
     setVoiceHistory(prev => [...prev.slice(-9), userMsg]);
     setConsoleLoading(true);
+
+    // Save user message to SQLite
+    try {
+      await LegalApiService.addChatMessage({ role: 'user', content: text, context: 'consult' });
+    } catch (e) { console.error("Failed to save user message to chat history", e); }
     
     // Determine task type
     const isSearch = text.toLowerCase().startsWith('search ') || text.toLowerCase().startsWith('find ');
@@ -439,6 +518,11 @@ export default function AdvocatePortal({ onBack }: { onBack: () => void }) {
           return updated;
         });
       }
+      
+      // Save assistant response to SQLite
+      try {
+        await LegalApiService.addChatMessage({ role: 'assistant', content: fullText, model: "Gemini 2.5 Flash", context: 'consult' });
+      } catch (e) { console.error("Failed to save assistant message to chat history", e); }
       
       // Final sync
       setVoiceHistory(prev => [...prev.slice(-9), { role: 'assistant', content: fullText, model: "Gemini 2.5 Flash" }]);
@@ -541,7 +625,14 @@ ${response.text}`;
     
     const utterance = new SpeechSynthesisUtterance(greeting);
     const voices = window.speechSynthesis.getVoices();
-    const voice = voices.find(v => v.lang.startsWith('en'));
+    const femaleVoice = voices.find(v => 
+      v.lang.startsWith('en') && 
+      (v.name.toLowerCase().includes('female') || 
+       v.name.toLowerCase().includes('samantha') || 
+       v.name.toLowerCase().includes('victoria') ||
+       v.name.toLowerCase().includes('google uk english female'))
+    );
+    const voice = femaleVoice || voices.find(v => v.lang.startsWith('en'));
     if (voice) utterance.voice = voice;
     window.speechSynthesis.speak(utterance);
 
@@ -1028,7 +1119,12 @@ ${response.text}`;
               <motion.div key="clients" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full p-6 overflow-y-auto space-y-6">
                 <div className="flex justify-between items-center">
                   <h2 className="text-3xl font-black italic text-slate-200">Client <span className="text-slate-500">Registry</span></h2>
-                  <button className="bg-indigo-600 px-6 py-2.5 rounded-2xl font-black text-xs tracking-widest uppercase">Add Client</button>
+                  <button 
+                    onClick={handleAddClient}
+                    className="bg-indigo-600 px-6 py-2.5 rounded-2xl font-black text-xs tracking-widest uppercase hover:bg-indigo-500 transition-colors"
+                  >
+                    Add Client
+                  </button>
                 </div>
                 <div style={S.card} className="overflow-hidden p-0">
                   <table className="w-full text-left">
