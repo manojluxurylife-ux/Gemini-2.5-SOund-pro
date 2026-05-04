@@ -1,0 +1,112 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Advocate profile information.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "advocate"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Client": {
+      "title": "Client",
+      "description": "Client information and case details.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Owner Advocate UID" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "caseNumber": { "type": "string" },
+        "court": { "type": "string" },
+        "nextDate": { "type": "string", "format": "date-time" },
+        "purpose": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "name"]
+    },
+    "Consultation": {
+      "title": "Consultation",
+      "description": "Transcript and summary of a call or meeting.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Owner Advocate UID" },
+        "clientId": { "type": "string", "description": "Reference to Client document ID" },
+        "transcript": { "type": "string" },
+        "summary": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "clientId", "transcript"]
+    },
+    "ChatHistory": {
+      "title": "ChatHistory",
+      "description": "AI chat logs for the advocate.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Owner Advocate UID" },
+        "role": { "type": "string", "enum": ["user", "assistant", "system"] },
+        "content": { "type": "string" },
+        "engine": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "role", "content"]
+    },
+    "Draft": {
+      "title": "Draft",
+      "description": "Legal document drafts.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Owner Advocate UID" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "caseFacts": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "title", "content"]
+    },
+    "ScannedDoc": {
+      "title": "ScannedDoc",
+      "description": "OCR results and document images.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Owner Advocate UID" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "imageBase64": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "title", "content"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "User profiles."
+    },
+    "clients/{clientId}": {
+      "schema": "Client",
+      "description": "Client records."
+    },
+    "consultations/{consultationId}": {
+      "schema": "Consultation",
+      "description": "Call transcripts and summaries."
+    },
+    "chat_history/{chatId}": {
+      "schema": "ChatHistory",
+      "description": "AI chat history."
+    },
+    "drafts/{draftId}": {
+      "schema": "Draft",
+      "description": "Legal document drafts."
+    },
+    "scanned_docs/{docId}": {
+      "schema": "ScannedDoc",
+      "description": "OCR results."
+    }
+  }
+}

@@ -1,0 +1,158 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId} (Firebase Auth UID)
+    // Fields:
+    //   - uid: string (required) - Firebase Auth UID
+    //   - email: string (required) - User email
+    //   - displayName: string (optional)
+    //   - photoURL: string (optional)
+    //   - role: string (required, enum: ['admin', 'advocate'])
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: clients
+    // Document ID: auto-generated
+    // Fields:
+    //   - uid: string (required) - Owner Advocate UID
+    //   - name: string (required)
+    //   - phone: string (optional)
+    //   - caseNumber: string (optional)
+    //   - court: string (optional)
+    //   - nextDate: timestamp (optional)
+    //   - purpose: string (optional)
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: consultations
+    // Document ID: auto-generated
+    // Fields:
+    //   - uid: string (required) - Owner Advocate UID
+    //   - clientId: string (required) - Reference to Client document ID
+    //   - transcript: string (required)
+    //   - summary: string (optional)
+    //   - timestamp: timestamp (required)
+    //
+    // [Other collections follow similar ownership pattern with 'uid' field]
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.uid;
+    }
+
+    function isRequestOwner() {
+      return isAuthenticated() && request.auth.uid == request.resource.data.uid;
+    }
+
+    function uidUnchanged() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == request.auth.uid;
+    }
+
+    function uidNotModified() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == resource.data.uid;
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "manojkrish70@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'role', 'createdAt']) &&
+             data.uid == request.auth.uid &&
+             isValidEmail(data.email) &&
+             data.role in ['admin', 'advocate'] &&
+             data.email.size() < 256;
+    }
+
+    function isValidClient(data) {
+      return data.keys().hasAll(['uid', 'name', 'createdAt']) &&
+             data.uid == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             (!('phone' in data) || (data.phone is string && data.phone.size() < 20)) &&
+             (!('caseNumber' in data) || (data.caseNumber is string && data.caseNumber.size() < 50));
+    }
+
+    function isValidConsultation(data) {
+      return data.keys().hasAll(['uid', 'clientId', 'transcript', 'timestamp']) &&
+             data.uid == request.auth.uid &&
+             data.transcript is string && data.transcript.size() < 100000;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == 'advocate' || isAdmin());
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == resource.data.role || isAdmin());
+    }
+
+    match /clients/{clientId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isRequestOwner() && isValidClient(request.resource.data);
+      allow update: if isDocOwner() && uidNotModified() && isValidClient(request.resource.data);
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /consultations/{consultationId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isRequestOwner() && isValidConsultation(request.resource.data);
+      allow update: if isDocOwner() && uidNotModified() && isValidConsultation(request.resource.data);
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /chat_history/{chatId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isRequestOwner();
+      allow update: if isDocOwner() && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /drafts/{draftId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isRequestOwner();
+      allow update: if isDocOwner() && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /scanned_docs/{docId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isRequestOwner();
+      allow update: if isDocOwner() && uidNotModified();
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    // Default deny
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}

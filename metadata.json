@@ -1,0 +1,8 @@
+{
+  "name": "Nexus Justice",
+  "description": "Advanced Legal Portal powered by Gemma4 LiteRT Offline Engine with integrated OkHttp/WorkManager for on-device orchestration.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
